@@ -35,6 +35,78 @@ lastfm = lastfm %>%
 glimpse(lastfm)
 ```
 
+```{r}
+lastfm %>% 
+    ggplot(aes(x = news)) +
+    geom_histogram(binwidth = 3)
+
+lastfm %>% 
+    ggplot(aes(x = old)) +
+    geom_histogram(binwidth = 5)
+```
+
+```{r}
+lastfm <- lastfm %>%
+    mutate(prop = news/(news + old))
+
+glimpse(lastfm)
+
+theta_c = lastfm %>%  
+  pull(prop) %>% 
+  mean() # theta: média calculada com todos os dados
+
+theta_c
+```
+
+## BootStrap
+
+```{r}
+repeticoes = 4000 # pelo menos 2000, mas mais não faz mal.
+
+um_bootstrap <- function(x){
+  prop = x %>% pull(prop)
+  boot_x <- sample(prop,           # amostre dos dados
+                   size = NROW(prop), # tamanho igual ao recebido
+                   replace = TRUE) # aqui é o bootstrap
+  return(mean(boot_x))
+}
+
+set.seed(1212)
+
+# A REAMOSTRAGEM
+reamostragens = tibble(i = 1:repeticoes) %>% 
+  mutate(theta_c_s = map_dbl(i, ~ um_bootstrap(lastfm)))
+
+reamostragens
+```
+
+
+```{r}
+reamostragens %>%
+  ggplot(aes(x = theta_c_s)) +
+  geom_histogram(binwidth = .01,
+                 colour = "darkorange",
+                 fill = "white")
+
+reamostragens %>%
+  ggplot(aes(x = theta_c_s - theta_c)) +
+  geom_histogram(binwidth = .01,
+                 colour = "darkblue",
+                 fill = "white")
+```
+
+
+## Calculando o IC
+
+```{r}
+intervalo = reamostragens %>% 
+  mutate(erro = theta_c_s - theta_c) %>% 
+  summarise(erro_i = quantile(erro, .025), 
+            erro_s = quantile(erro, .975))
+
+intervalo
+```
+
 ## Proporção de artistas novos e popularidade
 
 Utilizaremos ICs para estimar duas métricas sobre os usuários do LastFM em geral durante um período de 6 meses. Em ambos os casos faremos isso a partir de uma amostra de 300 usuários. As duas métricas são: 
