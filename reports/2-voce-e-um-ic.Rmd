@@ -16,6 +16,8 @@ output:
 ```{r setup, include=FALSE, message=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
+library(boot)
+library(broom)
 theme_set(theme_bw())
 ```
 
@@ -39,16 +41,20 @@ glimpse(lastfm)
 
 Utilizaremos ICs para estimar duas métricas sobre os usuários do LastFM em geral durante um período de 6 meses. Em ambos os casos faremos isso a partir de uma amostra de 300 usuários. As duas métricas são: 
 
-1. Qual a proporção de novos artistas em geral escutada por usuários?
+##1. Qual a proporção de novos artistas em geral escutada por usuários?
 
 ```{r}
 lastfm %>% 
     ggplot(aes(x = news)) +
-    geom_histogram(binwidth = 3)
+    geom_histogram(binwidth = 3) +
+    labs(x = "Novos artistas",
+         y = "Contagem")
 
 lastfm %>% 
     ggplot(aes(x = old)) +
-    geom_histogram(binwidth = 5)
+    geom_histogram(binwidth = 5) + 
+    labs(x = "Artistas já ouvidos",
+         y = "Contagem")
 ```
 
 ```{r}
@@ -146,6 +152,97 @@ ggplot() +
 ```
 
 
-2. Para os usuários que gostam de música muito pop (mediana_pop > 5), qual a correlação entre a popularidade mediana dos artistas escutado e a proporção dos artistas escutados que eram novos. 
+É possível afirmar com **95% de confiança** que os usuários do lastfm ouviram **entre 23% e 25%** de artistas novos **em média** nos 6 meses em que o dataset foi baseado.
 
-Crie intervalos com 95% de confiança.
+
+
+##2. Para os usuários que gostam de música muito pop (mediana_pop > 5), qual a correlação entre a popularidade mediana dos artistas escutado e a proporção dos artistas escutados que eram novos.
+
+```{r}
+lastfm %>% 
+    filter(mediana_pop > 5) %>%
+    ggplot(aes(x = mediana_pop, y = prop)) +
+    geom_point()
+```
+
+Aparentemente não existe uma relação linear entre as variáveis. Assim, considerarei spearman como coeficiente a ser comparado entre a amostra e as reamostras. Daqui em diante, para evitar confusão com as variáveis da pergunta 1, chamarei theta_c de spearman_c e theta_c_s de spearman_c_s.
+
+
+```{r}
+correlacoes = lastfm %>%
+    filter(mediana_pop > 5) %>%
+    summarise(pearson = cor(mediana_pop, prop, method = "pearson"), 
+            spearman = cor(mediana_pop, prop, method = "spearman"),
+            kendall = cor(mediana_pop, prop, method = "kendall"))
+
+correlacoes
+
+spearman_c = correlacoes %>%
+    pull(spearman)
+spearman_c
+```
+
+```{r}
+
+lastfm2 <- lastfm %>% filter(mediana_pop > 5)
+bootstrap_dois <- function(x){
+  boot_x <- sample_n(x,           # amostre dos dados
+                   size = NROW(prop), # tamanho igual ao recebido
+                   replace = TRUE) # aqui é o bootstrap
+  spearman_c_s <- boot_x %>%
+      summarise(spearman_c_s = cor(mediana_pop, prop, method = "spearman")) %>%
+      pull(spearman_c_s)
+  return(spearman_c_s)
+}
+
+set.seed(1212)
+
+# A REAMOSTRAGEM
+reamostragens2 = tibble(i = 1:repeticoes) %>% 
+  mutate(spearman_c_s = map_dbl(i, ~ bootstrap_dois(lastfm2)))
+
+reamostragens2
+```
+
+
+Calculando o erro e construindo o intervalo de confiança.
+
+```{r}
+intervalo2 = reamostragens2 %>% 
+  mutate(erro = spearman_c_s - spearman_c) %>% 
+  summarise(erro_i = quantile(erro, .025), 
+            erro_s = quantile(erro, .975))
+
+intervalo2 = intervalo2 %>% 
+  mutate(valor_i = spearman_c + erro_i, 
+         valor_s = spearman_c + erro_s)
+
+intervalo2
+```
+
+```{r}
+ggplot() +
+  geom_rect(
+    data = intervalo2,
+    aes(xmin = valor_i, xmax = valor_s),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "gold",
+    alpha = .25
+  ) +
+  geom_histogram(
+    data = reamostragens2,
+    aes(spearman_c_s),
+    binwidth = .02,
+    fill = "white",
+    colour = "darkgrey"
+  ) +
+  geom_vline(xintercept = spearman_c,
+             color = "blue",
+             size = 1.2) +
+  labs(title = expression("Intervalo estimado via bootstrap"))
+```
+
+Observando que coeficiente de correlação da amostra está muito próximo de zero, com uma confiança de 95% podemos acreditar não é possível afirmar que existe correlação entre o fato de um usuário gostar de música pop e ouvir mais ou menos artistas novos. Se essa correlação existe ela é muito pequena para ser significativa.
+
+
